@@ -28,6 +28,7 @@ import io.kubernetes.client.openapi.ApiException
 import kotlinx.coroutines.*
 import java.io.Closeable
 import java.io.IOException
+import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.URI
 import java.util.concurrent.CancellationException
@@ -41,6 +42,7 @@ class DevSpacesConnection(
 ) {
     companion object {
         private const val DEFAULT_REMOTE_IDE_PORT = 5990
+        private const val LOCAL_FORWARD_HOST = "127.0.0.1"
 
         internal fun remoteIdePort(joinLink: String): Int {
             val parsed = URI(joinLink)
@@ -52,7 +54,7 @@ class DevSpacesConnection(
             return URI(
                 parsed.scheme,
                 parsed.userInfo,
-                parsed.host,
+                LOCAL_FORWARD_HOST,
                 localPort,
                 parsed.path,
                 parsed.query,
@@ -240,7 +242,7 @@ class DevSpacesConnection(
     }
 
     private fun findFreePort(): Int {
-        ServerSocket(0).use { socket ->
+        ServerSocket(0, 50, InetAddress.getByName(LOCAL_FORWARD_HOST)).use { socket ->
             socket.reuseAddress = true
             return socket.localPort
         }

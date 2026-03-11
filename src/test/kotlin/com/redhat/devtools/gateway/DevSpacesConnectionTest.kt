@@ -28,10 +28,18 @@ class DevSpacesConnectionTest {
     }
 
     @Test
-    fun `localJoinLink rewrites only host port and preserves path query and fragment`() {
+    fun `localJoinLink rewrites to ipv4 loopback and preserves path query and fragment`() {
         val joinLink = "tcp://workspace.devspaces.example:63342/project/join?foo=bar#baz"
 
         assertThat(DevSpacesConnection.localJoinLink(joinLink, 51234))
-            .isEqualTo("tcp://workspace.devspaces.example:51234/project/join?foo=bar#baz")
+            .isEqualTo("tcp://127.0.0.1:51234/project/join?foo=bar#baz")
+    }
+
+    @Test
+    fun `localJoinLink rewrites localhost to ipv4 loopback`() {
+        val joinLink = "tcp://localhost:8080/join"
+
+        assertThat(DevSpacesConnection.localJoinLink(joinLink, 51234))
+            .isEqualTo("tcp://127.0.0.1:51234/join")
     }
 }

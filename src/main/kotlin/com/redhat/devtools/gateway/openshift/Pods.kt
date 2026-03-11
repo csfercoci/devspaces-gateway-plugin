@@ -32,8 +32,8 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 class Pods(private val client: ApiClient) {
-
     companion object {
+        private const val LOCAL_FORWARD_HOST = "127.0.0.1"
         private const val CONNECT_ATTEMPTS = 5
         private const val RECONNECT_DELAY: Long = 1000
     }
@@ -229,7 +229,7 @@ class Pods(private val client: ApiClient) {
 
     @Throws(IOException::class)
     fun forward(pod: V1Pod, localPort: Int, remotePort: Int): Closeable {
-        val serverSocket = ServerSocket(localPort, 50, InetAddress.getLoopbackAddress())
+        val serverSocket = ServerSocket(localPort, 50, InetAddress.getByName(LOCAL_FORWARD_HOST))
         val scope = CoroutineScope(
             // dont cancel if child coroutine fails + use blocking I/O scope
             SupervisorJob() + Dispatchers.IO
@@ -367,7 +367,7 @@ class Pods(private val client: ApiClient) {
         repeat(maxRetries) { attempt ->
             try {
                 val testSocket = ServerSocket()
-                testSocket.bind(InetSocketAddress("127.0.0.1", port))
+                testSocket.bind(InetSocketAddress(LOCAL_FORWARD_HOST, port))
                 testSocket.close()
                 // If we can bind to the port, it means port forwarding is not ready yet
                 Thread.sleep(retryDelay)
