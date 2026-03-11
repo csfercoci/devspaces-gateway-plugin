@@ -81,9 +81,9 @@ data class DevWorkspace(
     }
 
     override fun hashCode(): Int {
-        var result = metadata.hashCode()
-        result = 31 * result + spec.hashCode()
-        result = 31 * result + status.hashCode()
+        var result = metadata.name.hashCode()
+        result = 31 * result + metadata.namespace.hashCode()
+        result = 31 * result + (metadata.cheEditor?.hashCode() ?: 0)
         return result
     }
 }

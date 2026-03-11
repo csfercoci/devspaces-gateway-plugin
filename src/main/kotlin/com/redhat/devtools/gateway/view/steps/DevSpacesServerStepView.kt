@@ -49,6 +49,40 @@ class DevSpacesServerStepView(
     private val triggerNextAction: (() -> Unit)? = null
 ) : DevSpacesWizardStep {
 
+    internal data class ClusterSelection(
+        val selectedCluster: Cluster?,
+        val token: String
+    )
+
+    internal companion object {
+        fun resolveClusterSelection(
+            name: String?,
+            clusters: List<Cluster>,
+            savedCluster: Cluster?,
+            savedServer: String?,
+            savedToken: String?
+        ): ClusterSelection {
+            val matchingClusterByName = clusters.find { it.name == name }
+            val matchingClusterBySavedId = clusters.firstOrNull { it.id == savedCluster?.id }
+            val matchingClusterBySavedServer = savedServer?.let { serverUrl ->
+                clusters.firstOrNull { it.url == serverUrl }
+            }
+            val selectedCluster = matchingClusterByName
+                ?: matchingClusterBySavedId
+                ?: matchingClusterBySavedServer
+                ?: savedServer
+                    ?.takeIf { serverUrl -> serverUrl.isNotBlank() && clusters.none { it.url == serverUrl } }
+                    ?.let { serverUrl -> Cluster.fromNameAndUrl(serverUrl) }
+                ?: clusters.firstOrNull()
+            val token = if (!savedToken.isNullOrBlank() && selectedCluster?.url == savedServer) {
+                savedToken
+            } else {
+                selectedCluster?.token ?: savedToken.orEmpty()
+            }
+            return ClusterSelection(selectedCluster, token)
+        }
+    }
+
     private lateinit var allClusters: List<Cluster>
 
     private val settings: ServerSettings = ServerSettings()
@@ -204,7 +238,7 @@ class DevSpacesServerStepView(
         )
 
         if (success) {
-            settings.save(tfServer.selectedItem as? Cluster)
+            settings.save(server, token)
             devSpacesContext.client = client
         }
 
@@ -247,11 +281,16 @@ class DevSpacesServerStepView(
     private fun setSelectedCluster(name: String?, clusters: List<Cluster>) {
         tfServer.selectedItem = null // Reset selectedItem
         val saved = settings.load(clusters)
-        val toSelect = clusters.find { it.name == name }
-            ?: clusters.firstOrNull { it.id == saved?.id }
-            ?: clusters.firstOrNull()
-        tfServer.selectedItem = toSelect
-        tfToken.text = toSelect?.token ?: ""
+        val selection = resolveClusterSelection(
+            name,
+            clusters,
+            saved,
+            settings.serverUrl(),
+            settings.token()
+        )
+
+        tfServer.selectedItem = selection.selectedCluster
+        tfToken.text = selection.token
     }
 
     private fun startKubeconfigMonitor() {
@@ -281,9 +320,23 @@ class DevSpacesServerStepView(
             return clusters.find { it.url == service.state.server.orEmpty() }
         }
 
+        fun serverUrl(): String? {
+            return service.state.server
+        }
+
+        fun token(): String? {
+            return service.state.token
+        }
+
         fun save(toSave: Cluster?) {
             val cluster = toSave ?: return
             service.state.server = cluster.url
+            service.state.token = cluster.token
+        }
+
+        fun save(server: String?, token: String?) {
+            service.state.server = server?.takeIf { it.isNotBlank() }
+            service.state.token = token?.takeIf { it.isNotBlank() }
         }
     }
 }

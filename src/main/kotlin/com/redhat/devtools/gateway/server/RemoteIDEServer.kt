@@ -14,6 +14,7 @@ package com.redhat.devtools.gateway.server
 import com.google.gson.Gson
 import com.intellij.openapi.diagnostic.thisLogger
 import com.redhat.devtools.gateway.DevSpacesContext
+import com.redhat.devtools.gateway.openshift.DevWorkspace
 import com.redhat.devtools.gateway.openshift.Pods
 import com.redhat.devtools.gateway.util.isCancellationException
 import io.kubernetes.client.openapi.models.V1Container
@@ -25,7 +26,10 @@ import java.util.concurrent.CancellationException
 /**
  * Represent an IDE server running in a CDE.
  */
-class RemoteIDEServer(private val devSpacesContext: DevSpacesContext) {
+class RemoteIDEServer(
+    private val devSpacesContext: DevSpacesContext,
+    private val workspace: DevWorkspace = devSpacesContext.devWorkspace
+) {
     var pod: V1Pod
     private var container: V1Container
 
@@ -94,7 +98,22 @@ class RemoteIDEServer(private val devSpacesContext: DevSpacesContext) {
 
     @Throws(IOException::class)
     suspend fun waitServerTerminated(timeout: Long = 10L): Boolean {
-        return doWaitServerState(false, timeout)
+        return withTimeoutOrNull(timeout * 1000) {
+            while (true) {
+                try {
+                    if (!getStatus().isFullyRunning) {
+                        return@withTimeoutOrNull true
+                    }
+                } catch (e: Exception) {
+                    if (e.isCancellationException()) throw e
+                    thisLogger().debug("Failed to check remote IDE server state.", e)
+                }
+                yield()
+                delay(500)
+            }
+            @Suppress("UNREACHABLE_CODE")
+            false
+        } ?: false
     }
 
     /**
@@ -127,14 +146,14 @@ class RemoteIDEServer(private val devSpacesContext: DevSpacesContext) {
 
     @Throws(IOException::class)
     private fun findPod(): V1Pod {
-        val selector = "controller.devfile.io/devworkspace_name=${devSpacesContext.devWorkspace.name}"
+        val selector = "controller.devfile.io/devworkspace_name=${workspace.name}"
 
         return Pods(devSpacesContext.client)
             .findFirst(
-                devSpacesContext.devWorkspace.namespace,
+                workspace.namespace,
                 selector
             ) ?: throw IOException(
-            "DevWorkspace '${devSpacesContext.devWorkspace.name}' is not running.",
+            "DevWorkspace '${workspace.name}' is not running.",
         )
     }
 

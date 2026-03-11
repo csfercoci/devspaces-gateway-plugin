@@ -4,6 +4,25 @@
 
 ## [Unreleased]
 
+## [0.0.16] - 2026-03-11
+
+### ✨ New Features and Enhancements
+
+- improve compatibility with older Dev Spaces remote IDE servers by accepting project-level join links when a top-level join link is not present
+- respect the remote IDE port advertised by the server join link instead of assuming a fixed forwarded port
+
+### 🐛 Bug Fixes
+
+- fix: persist and reload the last used cluster server and token in the Gateway connection wizard
+- fix: run workspace connection startup in a background task to reduce Gateway UI freezes during connection attempts
+- fix: isolate connection state per DevWorkspace so multiple open Dev Spaces sessions do not overwrite each other's workspace lifecycle callbacks
+- fix: make DevWorkspace identity stable across refreshes so active-session tracking remains correct when workspace status changes
+
+### 🛠️ Code Improvements
+
+- refactor: remove shared mutable workspace coupling from the connection and remote IDE server lifecycle
+- add focused tests for join-link rewriting, older-server fallbacks, server/token selection persistence, and DevWorkspace identity tracking
+
 ## [0.0.15] - 2026-02-11
 
 ℹ️  Passed test output is hidden.
@@ -217,7 +236,7 @@
 - @azatsarynnyy
 - @tolusha
 
-[Unreleased]: https://github.com/redhat-developer/devspaces-gateway-plugin/compare/v0.0.15...HEAD
+[Unreleased]: https://github.com/redhat-developer/devspaces-gateway-plugin/compare/v0.0.16...HEAD
 [0.0.15]: https://github.com/redhat-developer/devspaces-gateway-plugin/compare/v0.0.14...v0.0.15
 [0.0.14]: https://github.com/redhat-developer/devspaces-gateway-plugin/compare/v0.0.13...v0.0.14
 [0.0.13]: https://github.com/redhat-developer/devspaces-gateway-plugin/compare/v0.0.12...v0.0.13

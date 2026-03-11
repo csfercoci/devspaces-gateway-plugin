@@ -26,10 +26,24 @@ data class RemoteIDEServerStatus(
         }
     }
 
+    internal val preferredJoinLink: String?
+        get() {
+            return joinLink?.takeIf { it.isNotBlank() }
+                ?: projects
+                    ?.firstNotNullOfOrNull { project ->
+                        project.preferredJoinLink
+                    }
+        }
+
     val isReady: Boolean
         get() {
-            return !joinLink.isNullOrBlank()
-                && !projects.isNullOrEmpty() }
+            return !preferredJoinLink.isNullOrBlank()
+        }
+
+    internal val isFullyRunning: Boolean
+        get() {
+            return !preferredJoinLink.isNullOrBlank() && !projects.isNullOrEmpty()
+        }
 
     override fun equals(other: Any?): Boolean {
         if (this === other) return true

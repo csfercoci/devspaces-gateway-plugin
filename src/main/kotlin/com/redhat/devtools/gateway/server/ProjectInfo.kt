@@ -18,5 +18,8 @@ data class ProjectInfo(
     val joinLink: String,
     val httpLink: String,
     val gatewayLink: String,
-)
+) {
+    internal val preferredJoinLink: String?
+        get() = joinLink.takeIf { it.isNotBlank() }
+}
 

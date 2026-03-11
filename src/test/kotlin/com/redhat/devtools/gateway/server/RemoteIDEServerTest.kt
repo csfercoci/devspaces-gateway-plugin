@@ -11,7 +11,12 @@
  */
 package com.redhat.devtools.gateway.server
 
+import com.google.gson.Gson
 import com.redhat.devtools.gateway.DevSpacesContext
+import com.redhat.devtools.gateway.openshift.DevWorkspace
+import com.redhat.devtools.gateway.openshift.DevWorkspaceObjectMeta
+import com.redhat.devtools.gateway.openshift.DevWorkspaceSpec
+import com.redhat.devtools.gateway.openshift.DevWorkspaceStatus
 import com.redhat.devtools.gateway.openshift.Pods
 import io.kubernetes.client.openapi.models.V1Container
 import io.kubernetes.client.openapi.models.V1ObjectMeta
@@ -30,10 +35,16 @@ class RemoteIDEServerTest {
 
     private lateinit var devSpacesContext: DevSpacesContext
     private lateinit var remoteIDEServer: RemoteIDEServer
+    private lateinit var workspace: DevWorkspace
 
     @BeforeEach
     fun beforeEach() {
         devSpacesContext = mockk(relaxed = true)
+        workspace = DevWorkspace(
+            DevWorkspaceObjectMeta("test-workspace", "test-namespace", "uid-1", null),
+            DevWorkspaceSpec(true),
+            DevWorkspaceStatus("Running")
+        )
 
         mockkConstructor(Pods::class)
         val mockPod = V1Pod().apply {
@@ -57,7 +68,7 @@ class RemoteIDEServerTest {
             anyConstructed<Pods>().findFirst(any(), any())
         } returns mockPod
 
-        remoteIDEServer = spyk(RemoteIDEServer(devSpacesContext), recordPrivateCalls = true)
+        remoteIDEServer = RemoteIDEServer(devSpacesContext, workspace)
     }
 
     @AfterEach
@@ -66,17 +77,12 @@ class RemoteIDEServerTest {
     }
 
     @Test
-    fun `#waitServerReady should throw if server status has no join link`() {
+    fun `#waitServerReady should throw if server status has no supported join link and no projects`() {
         // given
-        val withoutJoinLink = remoteIDEServerStatus(
-            null,
-            arrayOf(
-                projectInfo("death star")
-            )
-        )
+        val withoutProjects = remoteIDEServerStatus(null, null)
         coEvery {
-            remoteIDEServer.getStatus()
-        } returns withoutJoinLink
+            anyConstructed<Pods>().exec(any(), any(), any(), any(), any())
+        } returns statusOutput(withoutProjects)
 
         // when, then
         assertThrows<IOException> {
@@ -87,40 +93,19 @@ class RemoteIDEServerTest {
     }
 
     @Test
-    fun `#waitServerReady should throw if server status has a join link but no projects`() {
+    fun `#waitServerReady should return true if project join link is present`() {
         // given
         val withoutProjects = remoteIDEServerStatus(
-            "https://starwars.galaxy?peridea",
-            null
-        )
-        coEvery {
-            remoteIDEServer.getStatus()
-        } returns withoutProjects
-
-        // when, then
-        assertThrows<IOException> {
-            runBlocking {
-                remoteIDEServer.waitServerReady(timeout = 1)
-            }
-        }
-    }
-
-    @Test
-    fun `#waitServerTerminated should return true if server status has no join link`() {
-        // given
-        val withoutJoinLink = remoteIDEServerStatus(
             null,
-            arrayOf(
-                projectInfo("death star")
-            )
+            arrayOf(projectInfo("death star"))
         )
         coEvery {
-            remoteIDEServer.getStatus()
-        } returns withoutJoinLink
+            anyConstructed<Pods>().exec(any(), any(), any(), any(), any())
+        } returns statusOutput(withoutProjects)
 
         // when
         val result = runBlocking {
-            remoteIDEServer.waitServerTerminated()
+            remoteIDEServer.waitServerReady(timeout = 1)
         }
 
         // then
@@ -129,14 +114,14 @@ class RemoteIDEServerTest {
 
     @Test
     fun `#waitServerTerminated should return true if server status has a join link but no projects`() {
-        // given
+        // given - server has a join link but no projects, so it's no longer fully running
         val withoutProjects = remoteIDEServerStatus(
             "https://starwars.galaxy?peridea",
             null
         )
         coEvery {
-            remoteIDEServer.getStatus()
-        } returns withoutProjects
+            anyConstructed<Pods>().exec(any(), any(), any(), any(), any())
+        } returns statusOutput(withoutProjects)
 
         // when
         val result = runBlocking {
@@ -151,14 +136,14 @@ class RemoteIDEServerTest {
     fun `#waitServerTerminated should return false on timeout`() {
         // given
         coEvery {
-            remoteIDEServer.getStatus()
-        } returns remoteIDEServerStatus(
+            anyConstructed<Pods>().exec(any(), any(), any(), any(), any())
+        } returns statusOutput(remoteIDEServerStatus(
             // running server has join link and projects
             "https://starwars.galaxy?peridea",
             arrayOf(
                 projectInfo("death star")
             )
-        )
+        ))
 
         // when
         val result = runBlocking {
@@ -173,7 +158,7 @@ class RemoteIDEServerTest {
     fun `#waitServerTerminated should return false on exception`() {
         // given
         coEvery {
-            remoteIDEServer.getStatus()
+            anyConstructed<Pods>().exec(any(), any(), any(), any(), any())
         } throws IOException("error")
 
         // when
@@ -194,6 +179,10 @@ class RemoteIDEServerTest {
             "",
             projects
         )
+    }
+
+    private fun statusOutput(status: RemoteIDEServerStatus): String {
+        return Gson().toJson(status)
     }
 
     private fun projectInfo(name: String): ProjectInfo {

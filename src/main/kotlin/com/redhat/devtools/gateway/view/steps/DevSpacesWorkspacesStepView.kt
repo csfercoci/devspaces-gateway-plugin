@@ -16,7 +16,9 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.invokeLater
 import com.intellij.openapi.application.runInEdt
 import com.intellij.openapi.diagnostic.thisLogger
+import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
+import com.intellij.openapi.progress.Task
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.wm.impl.welcomeScreen.WelcomeScreenUIManager
 import com.intellij.ui.ColoredListCellRenderer
@@ -31,10 +33,13 @@ import com.redhat.devtools.gateway.DevSpacesConnection
 import com.redhat.devtools.gateway.DevSpacesContext
 import com.redhat.devtools.gateway.DevSpacesIcons
 import com.redhat.devtools.gateway.openshift.*
+import com.redhat.devtools.gateway.util.ProgressCountdown
+import com.redhat.devtools.gateway.util.isCancellationException
 import com.redhat.devtools.gateway.util.messageWithoutPrefix
 import com.redhat.devtools.gateway.view.ui.Dialogs
 import com.redhat.devtools.gateway.view.ui.onDoubleClick
 import kotlinx.coroutines.runBlocking
+import java.util.concurrent.CancellationException
 import java.awt.Dimension
 import java.awt.FontMetrics
 import javax.swing.*
@@ -312,20 +317,24 @@ class DevSpacesWorkspacesStepView(
     }
 
     private fun connect() {
-        getSelectedWorkspace().apply {
-            if (this != null) {
-                devSpacesContext.devWorkspace = this
-            }
-        }
+        val selectedWorkspace = getSelectedWorkspace() ?: return
+        devSpacesContext.devWorkspace = selectedWorkspace
 
-        ProgressManager.getInstance().runProcessWithProgressSynchronously(
-            {
+        ProgressManager.getInstance().run(object : Task.Backgroundable(
+            null,
+            DevSpacesBundle.message("connector.loader.devspaces.connecting.text"),
+            true
+        ) {
+            override fun run(indicator: ProgressIndicator) {
+                val countdown = ProgressCountdown(indicator)
                 try {
-                    DevSpacesConnection(devSpacesContext).connect(
+                    indicator.isIndeterminate = true
+                    runBlocking {
+                        DevSpacesConnection(devSpacesContext, selectedWorkspace).connect(
                         {
                             refreshDevWorkspace(
-                                devSpacesContext.devWorkspace.namespace,
-                                devSpacesContext.devWorkspace.name
+                                selectedWorkspace.namespace,
+                                selectedWorkspace.name
                             )
                             enableButtons()
                         },
@@ -333,29 +342,39 @@ class DevSpacesWorkspacesStepView(
                             enableButtons()
                         },
                         {
-                            if (waitDevWorkspaceStopped(devSpacesContext.devWorkspace)) {
+                            if (waitDevWorkspaceStopped(selectedWorkspace)) {
                                 refreshDevWorkspace(
-                                    devSpacesContext.devWorkspace.namespace,
-                                    devSpacesContext.devWorkspace.name
+                                    selectedWorkspace.namespace,
+                                    selectedWorkspace.name
                                 )
                                 enableButtons()
                             }
+                        },
+                        onProgress = { progress ->
+                            countdown.update(progress.title, progress.message, progress.countdownSeconds)
+                        },
+                        checkCancelled = {
+                            if (indicator.isCanceled) {
+                                throw CancellationException("User cancelled the operation")
+                            }
                         }
                     )
+                    }
                 } catch (e: Exception) {
                     refreshDevWorkspace(
-                        devSpacesContext.devWorkspace.namespace,
-                        devSpacesContext.devWorkspace.name
+                        selectedWorkspace.namespace,
+                        selectedWorkspace.name
                     )
                     enableButtons()
-                    thisLogger().error("Remote server connection failed.", e)
-                    Dialogs.error(e.messageWithoutPrefix() ?: "Could not connect to workspace", "Connection Error")
+                    if (!e.isCancellationException()) {
+                        thisLogger().error("Remote server connection failed.", e)
+                        Dialogs.error(e.messageWithoutPrefix() ?: "Could not connect to workspace", "Connection Error")
+                    }
+                } finally {
+                    countdown.dispose()
                 }
-            },
-            DevSpacesBundle.message("connector.loader.devspaces.connecting.text"),
-            true,
-            null
-        )
+            }
+        })
     }
 
     private fun waitDevWorkspaceNotStopped(devWorkspace: DevWorkspace): Boolean {
