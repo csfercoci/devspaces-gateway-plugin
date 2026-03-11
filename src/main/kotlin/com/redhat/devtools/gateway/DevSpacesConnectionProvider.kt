@@ -20,6 +20,7 @@ import com.intellij.ui.dsl.builder.panel
 import com.jetbrains.gateway.api.ConnectionRequestor
 import com.jetbrains.gateway.api.GatewayConnectionHandle
 import com.jetbrains.gateway.api.GatewayConnectionProvider
+import com.jetbrains.gateway.thinClientLink.LinkedClientManager
 import com.redhat.devtools.gateway.kubeconfig.KubeConfigUtils
 import com.redhat.devtools.gateway.openshift.DevWorkspaces
 import com.redhat.devtools.gateway.openshift.OpenShiftClientFactory
@@ -33,6 +34,7 @@ import io.kubernetes.client.openapi.ApiException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.suspendCancellableCoroutine
+import java.net.URI
 import java.util.concurrent.CancellationException
 import javax.swing.JComponent
 import javax.swing.Timer
@@ -40,6 +42,7 @@ import kotlin.coroutines.resume
 
 private const val DW_NAMESPACE = "dwNamespace"
 private const val DW_NAME = "dwName"
+private const val LINK = "link"
 
 /**
  * Handles links as:
@@ -47,6 +50,21 @@ private const val DW_NAME = "dwName"
  *      https://code-with-me.jetbrains.com/remoteDev#type=devspaces
  */
 class DevSpacesConnectionProvider : GatewayConnectionProvider {
+
+    companion object {
+        internal fun directGatewayLink(parameters: Map<String, String>): URI? {
+            val rawLink = parameters[LINK]
+                ?.takeIf { it.isNotBlank() }
+                ?: return null
+
+            return runCatching { URI(rawLink) }
+                .getOrNull()
+                ?.takeIf { uri ->
+                    !uri.scheme.isNullOrBlank() &&
+                        (!uri.host.isNullOrBlank() || !uri.authority.isNullOrBlank())
+                }
+        }
+    }
 
     private var clientFactory: OpenShiftClientFactory? = null
 
@@ -56,6 +74,8 @@ class DevSpacesConnectionProvider : GatewayConnectionProvider {
         parameters: Map<String, String>,
         requestor: ConnectionRequestor
     ): GatewayConnectionHandle? {
+        logIncomingRequest(parameters)
+
         return suspendCancellableCoroutine { cont ->
             ProgressManager.getInstance().runProcessWithProgressSynchronously(
                 {
@@ -81,6 +101,9 @@ class DevSpacesConnectionProvider : GatewayConnectionProvider {
                         thinClient.clientClosed.advise(thinClient.lifetime,
                             onClientClosed(ready, indicator)
                         )
+                        if (thinClient.clientPresent && ready.isActive) {
+                            ready.complete(handle)
+                        }
                         ready.invokeOnCompletion { error ->
                             if (error == null) {
                                 cont.resume(ready.getCompleted())
@@ -89,6 +112,7 @@ class DevSpacesConnectionProvider : GatewayConnectionProvider {
                             }
                         }
                     } catch (e: ApiException) {
+                        thisLogger().warn(connectionFailureMessage(parameters), e)
                         indicator.text = "Connection failed"
                         runDelayed(2000, { if (indicator.isRunning) indicator.stop() })
                         if (!(handleUnauthorizedError(e) || handleNotFoundError(e))) {
@@ -100,6 +124,7 @@ class DevSpacesConnectionProvider : GatewayConnectionProvider {
 
                         if (cont.isActive) cont.resume(null)
                     } catch (e: Exception) {
+                        thisLogger().warn(connectionFailureMessage(parameters), e)
                         if (e.isCancellationException() || indicator.isCanceled) {
                             indicator.text2 = "Error: ${e.message}"
                             runDelayed(2000) { if (indicator.isRunning) indicator.stop() }
@@ -120,6 +145,22 @@ class DevSpacesConnectionProvider : GatewayConnectionProvider {
                 null
             )
         }
+    }
+
+    private fun logIncomingRequest(parameters: Map<String, String>) {
+        val namespace = parameters[DW_NAMESPACE].orEmpty()
+        val workspace = parameters[DW_NAME].orEmpty()
+        val link = parameters[LINK].orEmpty()
+
+        thisLogger().info(
+            "Received Dev Spaces connection request: namespace='$namespace', workspace='$workspace', link='$link'"
+        )
+    }
+
+    private fun connectionFailureMessage(parameters: Map<String, String>): String {
+        val namespace = parameters[DW_NAMESPACE].orEmpty()
+        val workspace = parameters[DW_NAME].orEmpty()
+        return "Dev Spaces connection failed: namespace='$namespace', workspace='$workspace'"
     }
 
     private fun onClientPresenceChanged(
@@ -176,6 +217,29 @@ class DevSpacesConnectionProvider : GatewayConnectionProvider {
         indicator: ProgressCountdown
     ): GatewayConnectionHandle {
         thisLogger().debug("Launched Dev Spaces connection provider", parameters)
+
+        directGatewayLink(parameters)?.let { directLink ->
+            val workspaceName = parameters[DW_NAME].takeUnless { it.isNullOrBlank() } ?: "Remote IDE"
+            indicator.update(message = "Opening remote IDE from external link…")
+            thisLogger().info("Using direct Dev Spaces gateway link '$directLink' for workspace '$workspaceName'")
+
+            val thinClient = LinkedClientManager
+                .getInstance()
+                .startNewClient(
+                    com.jetbrains.rd.util.lifetime.Lifetime.Eternal,
+                    directLink,
+                    "",
+                    {},
+                    false
+                )
+
+            return DevSpacesConnectionHandle(
+                thinClient.lifetime,
+                thinClient,
+                { createComponent(workspaceName) },
+                workspaceName
+            )
+        }
 
         indicator.update(message = "Preparing connection environment…")
 

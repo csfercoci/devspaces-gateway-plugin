@@ -50,6 +50,24 @@ class DevSpacesServerStepViewTest {
     }
 
     @Test
+    fun `resolveClusterSelection prefers saved server over kubeconfig fallback cluster`() {
+        val first = Cluster("cluster-a", "https://cluster-a.example", "token-a")
+        val second = Cluster("cluster-b", "https://cluster-b.example", "token-b")
+
+        val selection = DevSpacesServerStepView.resolveClusterSelection(
+            name = null,
+            clusters = listOf(first, second),
+            savedCluster = null,
+            savedServer = second.url,
+            savedToken = "saved-token",
+            fallbackName = first.name
+        )
+
+        assertThat(selection.selectedCluster).isEqualTo(second)
+        assertThat(selection.token).isEqualTo("saved-token")
+    }
+
+    @Test
     fun `resolveClusterSelection creates an ad hoc cluster for saved custom server and keeps saved token`() {
         val first = Cluster("cluster-a", "https://cluster-a.example", "token-a")
         val customServer = "https://custom.devspaces.example"
@@ -60,6 +78,24 @@ class DevSpacesServerStepViewTest {
             savedCluster = null,
             savedServer = customServer,
             savedToken = "saved-token"
+        )
+
+        assertThat(selection.selectedCluster?.url).isEqualTo(customServer)
+        assertThat(selection.token).isEqualTo("saved-token")
+    }
+
+    @Test
+    fun `resolveClusterSelection prefers saved custom server over kubeconfig fallback cluster`() {
+        val first = Cluster("cluster-a", "https://cluster-a.example", "token-a")
+        val customServer = "https://custom.devspaces.example"
+
+        val selection = DevSpacesServerStepView.resolveClusterSelection(
+            name = null,
+            clusters = listOf(first),
+            savedCluster = null,
+            savedServer = customServer,
+            savedToken = "saved-token",
+            fallbackName = first.name
         )
 
         assertThat(selection.selectedCluster?.url).isEqualTo(customServer)

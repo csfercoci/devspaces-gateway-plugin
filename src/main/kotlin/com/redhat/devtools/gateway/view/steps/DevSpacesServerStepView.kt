@@ -60,19 +60,23 @@ class DevSpacesServerStepView(
             clusters: List<Cluster>,
             savedCluster: Cluster?,
             savedServer: String?,
-            savedToken: String?
+            savedToken: String?,
+            fallbackName: String? = null
         ): ClusterSelection {
             val matchingClusterByName = clusters.find { it.name == name }
             val matchingClusterBySavedId = clusters.firstOrNull { it.id == savedCluster?.id }
             val matchingClusterBySavedServer = savedServer?.let { serverUrl ->
                 clusters.firstOrNull { it.url == serverUrl }
             }
+            val adHocSavedServerCluster = savedServer
+                ?.takeIf { serverUrl -> serverUrl.isNotBlank() && clusters.none { it.url == serverUrl } }
+                ?.let { serverUrl -> Cluster.fromNameAndUrl(serverUrl) }
+            val matchingClusterByFallbackName = clusters.find { it.name == fallbackName }
             val selectedCluster = matchingClusterByName
                 ?: matchingClusterBySavedId
                 ?: matchingClusterBySavedServer
-                ?: savedServer
-                    ?.takeIf { serverUrl -> serverUrl.isNotBlank() && clusters.none { it.url == serverUrl } }
-                    ?.let { serverUrl -> Cluster.fromNameAndUrl(serverUrl) }
+                ?: adHocSavedServerCluster
+                ?: matchingClusterByFallbackName
                 ?: clusters.firstOrNull()
             val token = if (!savedToken.isNullOrBlank() && selectedCluster?.url == savedServer) {
                 savedToken
@@ -197,7 +201,8 @@ class DevSpacesServerStepView(
                 val previouslySelected = tfServer.selectedItem as? Cluster?
                 setClusters(updatedClusters)
                 setSelectedCluster(
-                    (previouslySelected)?.name ?: kubeConfigCurrentCluster,
+                    previouslySelected?.name,
+                    kubeConfigCurrentCluster,
                     updatedClusters
                 )
                 enableKubeconfigCheckbox()
@@ -278,7 +283,7 @@ class DevSpacesServerStepView(
         }
     }
 
-    private fun setSelectedCluster(name: String?, clusters: List<Cluster>) {
+    private fun setSelectedCluster(name: String?, fallbackName: String?, clusters: List<Cluster>) {
         tfServer.selectedItem = null // Reset selectedItem
         val saved = settings.load(clusters)
         val selection = resolveClusterSelection(
@@ -286,7 +291,8 @@ class DevSpacesServerStepView(
             clusters,
             saved,
             settings.serverUrl(),
-            settings.token()
+            settings.token(),
+            fallbackName
         )
 
         tfServer.selectedItem = selection.selectedCluster
